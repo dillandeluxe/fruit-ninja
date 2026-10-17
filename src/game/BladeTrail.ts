@@ -2,7 +2,7 @@ import { BladeColor, BladeTrailPoint, Point2D } from './types';
 
 export class BladeTrail {
   private points: BladeTrailPoint[] = [];
-  private maxAgeMs: number = 220; // Trail decay time
+  private maxAgeMs: number = 280; // Trail decay time
   private color: BladeColor = 'crimson';
   private currentSpeed: number = 0;
   public owner: 'p1' | 'p2' | 'single';
@@ -21,17 +21,15 @@ export class BladeTrail {
     let speed = 0;
     if (this.points.length > 0) {
       const last = this.points[this.points.length - 1];
-      const dt = (now - last.time) / 1000;
-      if (dt > 0.001) {
-        const dx = x - last.x;
-        const dy = y - last.y;
-        speed = Math.sqrt(dx * dx + dy * dy) / dt;
-      } else {
-        speed = last.speed;
-      }
+      const dt = Math.max(0.001, (now - last.time) / 1000);
+      const dx = x - last.x;
+      const dy = y - last.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      speed = dist / dt;
     }
-    this.currentSpeed = this.currentSpeed * 0.4 + speed * 0.6;
-    this.points.push({ x, y, time: now, speed: this.currentSpeed });
+    // Responsive speed tracking: 85% instantaneous, 15% history
+    this.currentSpeed = this.points.length === 0 ? speed : this.currentSpeed * 0.15 + speed * 0.85;
+    this.points.push({ x, y, time: now, speed: Math.max(speed, this.currentSpeed) });
   }
 
   public update() {
@@ -61,7 +59,7 @@ export class BladeTrail {
     return this.currentSpeed;
   }
 
-  public getSlicingSegments(minSpeed: number = 300): { p1: Point2D; p2: Point2D; speed: number; owner: 'p1' | 'p2' | 'single' }[] {
+  public getSlicingSegments(minSpeed: number = 60): { p1: Point2D; p2: Point2D; speed: number; owner: 'p1' | 'p2' | 'single' }[] {
     const segments: { p1: Point2D; p2: Point2D; speed: number; owner: 'p1' | 'p2' | 'single' }[] = [];
     if (this.points.length < 2) return segments;
 
@@ -69,7 +67,10 @@ export class BladeTrail {
       const p1 = this.points[i];
       const p2 = this.points[i + 1];
       const segSpeed = Math.max(p1.speed, p2.speed);
-      if (segSpeed >= minSpeed) {
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+      // Slice qualifies if hand has minimal velocity (60 px/s) OR moved at least 8px
+      if (segSpeed >= minSpeed || dist >= 8) {
         segments.push({
           p1: { x: p1.x, y: p1.y },
           p2: { x: p2.x, y: p2.y },

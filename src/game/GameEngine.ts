@@ -135,17 +135,14 @@ export class GameEngine {
 
   private setupMouseTouchEvents() {
     const handleMove = (x: number, y: number) => {
-      if (this.isMouseDown) {
-        // In Duel mode, clicking left side moves P1, clicking right side moves P2
-        if (this.settings.gameMode === 'duel') {
-          if (x < this.canvas.width * 0.5) {
-            this.bladeTrails[0].addPoint(x, y);
-          } else {
-            this.bladeTrails[2].addPoint(x, y);
-          }
-        } else {
+      if (this.settings.gameMode === 'duel') {
+        if (x < this.canvas.width * 0.5) {
           this.bladeTrails[0].addPoint(x, y);
+        } else {
+          this.bladeTrails[2].addPoint(x, y);
         }
+      } else {
+        this.bladeTrails[0].addPoint(x, y);
       }
     };
 
@@ -438,7 +435,7 @@ export class GameEngine {
   }
 
   private checkCollisions() {
-    const minSpeed = 280;
+    const minSpeed = 50;
 
     this.bladeTrails.forEach((trail) => {
       const segments = trail.getSlicingSegments(minSpeed);

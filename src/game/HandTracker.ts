@@ -15,6 +15,8 @@ export class HandTracker {
   private lastVideoTime: number = -1;
   private mirror: boolean = true;
   private smoothedPoints: Map<number, Point2D> = new Map();
+  private lastP1Points: Point2D[] = [];
+  private lastP2Points: Point2D[] = [];
 
   constructor(callbacks: HandTrackerCallbacks) {
     this.callbacks = callbacks;
@@ -38,7 +40,7 @@ export class HandTracker {
         );
       }
 
-      // Track up to 4 hands concurrently (enables 2 players with up to 2 hands each)
+      // Track up to 4 hands concurrently
       try {
         this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
@@ -104,11 +106,8 @@ export class HandTracker {
 
   public update(width: number, height: number): { p1Points: Point2D[]; p2Points: Point2D[]; playersDetected: number } {
     if (!this.isRunning || !this.video || !this.handLandmarker || this.video.readyState < 2) {
-      return { p1Points: [], p2Points: [], playersDetected: 0 };
+      return { p1Points: this.lastP1Points, p2Points: this.lastP2Points, playersDetected: 0 };
     }
-
-    const p1Points: Point2D[] = [];
-    const p2Points: Point2D[] = [];
 
     try {
       const now = performance.now();
@@ -116,43 +115,73 @@ export class HandTracker {
         this.lastVideoTime = this.video.currentTime;
         const results = this.handLandmarker.detectForVideo(this.video, now);
 
+        const vW = this.video.videoWidth || 1280;
+        const vH = this.video.videoHeight || 720;
+        const videoRatio = vW / vH;
+        const canvasRatio = width / height;
+
+        let drawW = width;
+        let drawH = height;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (videoRatio > canvasRatio) {
+          drawW = height * videoRatio;
+          offsetX = -(drawW - width) / 2;
+        } else {
+          drawH = width / videoRatio;
+          offsetY = -(drawH - height) / 2;
+        }
+
+        const currentP1: Point2D[] = [];
+        const currentP2: Point2D[] = [];
+
         if (results && results.landmarks && results.landmarks.length > 0) {
           results.landmarks.forEach((landmarks, handIndex) => {
-            const tip = landmarks[8]; // Index finger tip
+            // Index fingertip is landmark 8. Fallback to middle finger 12 or knuckle 9
+            const tip = landmarks[8] || landmarks[12] || landmarks[9];
             if (!tip) return;
 
-            const targetX = this.mirror ? (1 - tip.x) * width : tip.x * width;
-            const targetY = tip.y * height;
+            // Map normalized coordinates directly to where the video renders on canvas
+            const normX = this.mirror ? (1 - tip.x) : tip.x;
+            const targetX = offsetX + normX * drawW;
+            const targetY = offsetY + tip.y * drawH;
 
             let prev = this.smoothedPoints.get(handIndex);
             if (!prev) {
               prev = { x: targetX, y: targetY };
             } else {
+              // Fast responsive smoothing: 80% new position, 20% history
               prev = {
-                x: prev.x * 0.35 + targetX * 0.65,
-                y: prev.y * 0.35 + targetY * 0.65,
+                x: prev.x * 0.2 + targetX * 0.8,
+                y: prev.y * 0.2 + targetY * 0.8,
               };
             }
             this.smoothedPoints.set(handIndex, prev);
 
-            // Separate players spatially: Left side is Player 1, Right side is Player 2
+            // Separate players spatially: Left half is Player 1, Right half is Player 2
             if (prev.x < width * 0.5) {
-              p1Points.push({ x: prev.x, y: prev.y });
+              currentP1.push({ x: prev.x, y: prev.y });
             } else {
-              p2Points.push({ x: prev.x, y: prev.y });
+              currentP2.push({ x: prev.x, y: prev.y });
             }
           });
+
+          this.lastP1Points = currentP1;
+          this.lastP2Points = currentP2;
         } else {
           this.smoothedPoints.clear();
+          this.lastP1Points = [];
+          this.lastP2Points = [];
         }
       }
     } catch {
       // Ignore transient frame detection drops
     }
 
-    const playersDetected = (p1Points.length > 0 ? 1 : 0) + (p2Points.length > 0 ? 1 : 0);
-    this.callbacks.onHandsDetected(p1Points, p2Points, playersDetected);
-    return { p1Points, p2Points, playersDetected };
+    const playersDetected = (this.lastP1Points.length > 0 ? 1 : 0) + (this.lastP2Points.length > 0 ? 1 : 0);
+    this.callbacks.onHandsDetected(this.lastP1Points, this.lastP2Points, playersDetected);
+    return { p1Points: this.lastP1Points, p2Points: this.lastP2Points, playersDetected };
   }
 
   public getVideo(): HTMLVideoElement | null {
@@ -169,5 +198,7 @@ export class HandTracker {
       this.video.srcObject = null;
     }
     this.smoothedPoints.clear();
+    this.lastP1Points = [];
+    this.lastP2Points = [];
   }
 }

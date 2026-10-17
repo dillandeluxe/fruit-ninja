@@ -209,7 +209,8 @@ export class Fruit {
   public intersectsSegment(p1: Point2D, p2: Point2D, sensitivity: number = 1.0): boolean {
     if (this.isSliced) return false;
 
-    const hitRadius = this.radius * sensitivity;
+    // Generous arcade hit radius: fruit radius + blade glow radius (26px) * sensitivity
+    const hitRadius = (this.radius + 26) * sensitivity;
 
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
